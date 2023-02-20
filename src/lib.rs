@@ -178,9 +178,16 @@ impl Code {
         // JIS8) encoding, and that version 4 has a four-bit Mode prefix
         // follewed by an 8-bit character count.
 
-        let bytes = self
+        let block_1_plaintext = self.bit_positions.chunks_exact(8).take(32).flatten();
+        let block_2_plaintext = self
             .bit_positions
-            .iter()
+            .chunks_exact(8)
+            .skip(50)
+            .take(32)
+            .flatten();
+
+        let bytes = block_1_plaintext
+            .chain(block_2_plaintext)
             .skip(12)
             .tuples()
             .map(|(i1, i2, i3, i4, i5, i6, i7, i8)| {
@@ -205,6 +212,7 @@ impl Code {
         ASCII
             .decode(&bytes, encoding::DecoderTrap::Replace)
             .expect("Replace should never fail")
+            .replace(|c: char| -> bool { !c.is_ascii_graphic() }, "\u{fffd}")
     }
 
     fn bit_at(&self, x: usize, y: usize) -> bool {
