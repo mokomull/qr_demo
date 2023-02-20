@@ -119,10 +119,24 @@ pub enum Edge {
 }
 
 #[wasm_bindgen]
+pub enum Color {
+    Dark = "dark",
+    Light = "light",
+    HumanDark = "humandark",
+    HumanLight = "humanlight",
+}
+
+#[wasm_bindgen]
 pub struct Code {
     byte_edges: HashMap<(usize, usize), Vec<Edge>>,
     bit_positions: Vec<(usize, usize)>,
+    overrides: HashMap<(usize, usize), Color>,
     orig_data: Vec<bool>,
+    orig_decoded: Vec<u8>,
+
+    // each element is one Reed-Solomon block, each one containing a Vec of
+    // locations that each byte came from
+    blocks: Vec<Vec<[(usize, usize); 8]>>,
 }
 
 #[wasm_bindgen]
@@ -159,10 +173,24 @@ impl Code {
             .copied()
             .collect();
 
+        let blocks = bit_positions
+            .chunks_exact(8)
+            .map(|x| x.try_into().expect("8 positions must fit in a [_; 8]..."))
+            .collect::<Vec<_>>()
+            .chunks_exact(50)
+            .map(|x| x.to_vec())
+            .collect::<Vec<Vec<[(usize, usize); 8]>>>();
+
+        let orig_data: Vec<bool> = image.chars().map(|c| c == '1').collect();
+        let orig_decoded = decode(&blocks, 32, &orig_data);
+
         Code {
             byte_edges,
             bit_positions,
-            orig_data: image.chars().map(|c| c == '1').collect(),
+            overrides: HashMap::new(),
+            orig_data,
+            orig_decoded,
+            blocks,
         }
     }
 
@@ -173,55 +201,57 @@ impl Code {
             .unwrap_or_default()
     }
 
-    pub fn get_decoded_data(&self) -> String {
-        // TODO: this *assumes* that it's in 8-bit-byte (ASCII, but should be
-        // JIS8) encoding, and that version 4 has a four-bit Mode prefix
-        // follewed by an 8-bit character count.
-
-        let block_1_plaintext = self.bit_positions.chunks_exact(8).take(32).flatten();
-        let block_2_plaintext = self
-            .bit_positions
-            .chunks_exact(8)
-            .skip(50)
-            .take(32)
-            .flatten();
-
-        let bytes = block_1_plaintext
-            .chain(block_2_plaintext)
-            .skip(12)
-            .tuples()
-            .map(|(i1, i2, i3, i4, i5, i6, i7, i8)| {
-                // manually decode a byte, MSB-first
-                #[allow(clippy::bool_to_int_with_if)]
-                // because it doesn't make sense for the 0th bit to be any different
-                (if self.bit_at(i1.0, i1.1) { 128 } else { 0 }
-                    + if self.bit_at(i2.0, i2.1) { 64 } else { 0 }
-                    + if self.bit_at(i3.0, i3.1) { 32 } else { 0 }
-                    + if self.bit_at(i4.0, i4.1) { 16 } else { 0 }
-                    + if self.bit_at(i5.0, i5.1) { 8 } else { 0 }
-                    + if self.bit_at(i6.0, i6.1) { 4 } else { 0 }
-                    + if self.bit_at(i7.0, i7.1) { 2 } else { 0 }
-                    + if self.bit_at(i8.0, i8.1) { 1 } else { 0 })
-            })
-            .collect::<Vec<u8>>();
-
+    pub fn get_orig_decoded_data(&self) -> String {
         // the encoding is actually JIS8, but assuming that a QR code is a URL
         // or something ... it'll be in the range where ASCII and JIS8 overlap.
         // And with ASCII, we won't try to interpret any multi-byte sequences
         // like we would if we were to erroneously try decoding as Shift-JIS.
         ASCII
-            .decode(&bytes, encoding::DecoderTrap::Replace)
+            .decode(&self.orig_decoded, encoding::DecoderTrap::Replace)
             .expect("Replace should never fail")
             .replace(|c: char| -> bool { !c.is_ascii_graphic() }, "\u{fffd}")
     }
+}
 
-    fn bit_at(&self, x: usize, y: usize) -> bool {
-        let dark_module = self.orig_data[y * 33 + x];
-        // TODO: this is hard-coded to mask pattern 010
-        if x % 3 == 0 {
-            !dark_module
-        } else {
-            dark_module
-        }
+fn decode(
+    blocks: &[Vec<[(usize, usize); 8]>],
+    plaintext_bytes_per_block: usize,
+    data: &[bool],
+) -> Vec<u8> {
+    // TODO: this *assumes* that it's in 8-bit-byte (ASCII, but should be
+    // JIS8) encoding, and that version 4 has a four-bit Mode prefix
+    // follewed by an 8-bit character count.
+
+    let plaintext_bits = blocks
+        .into_iter()
+        .map(|block| block.iter().take(plaintext_bytes_per_block).flatten())
+        .flatten();
+
+    plaintext_bits
+        .skip(12)
+        .tuples()
+        .map(|(i1, i2, i3, i4, i5, i6, i7, i8)| {
+            // manually decode a byte, MSB-first
+            #[allow(clippy::bool_to_int_with_if)]
+            // because it doesn't make sense for the 0th bit to be any different
+            (if bit_at(data, i1.0, i1.1) { 128 } else { 0 }
+                + if bit_at(data, i2.0, i2.1) { 64 } else { 0 }
+                + if bit_at(data, i3.0, i3.1) { 32 } else { 0 }
+                + if bit_at(data, i4.0, i4.1) { 16 } else { 0 }
+                + if bit_at(data, i5.0, i5.1) { 8 } else { 0 }
+                + if bit_at(data, i6.0, i6.1) { 4 } else { 0 }
+                + if bit_at(data, i7.0, i7.1) { 2 } else { 0 }
+                + if bit_at(data, i8.0, i8.1) { 1 } else { 0 })
+        })
+        .collect::<Vec<u8>>()
+}
+
+fn bit_at(data: &[bool], x: usize, y: usize) -> bool {
+    let dark_module = data[y * 33 + x];
+    // TODO: this is hard-coded to mask pattern 010
+    if x % 3 == 0 {
+        !dark_module
+    } else {
+        dark_module
     }
 }
