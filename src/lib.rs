@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use encoding::{all::WINDOWS_31J, Encoding};
+use encoding::{all::ASCII, Encoding};
 use itertools::Itertools;
 use wasm_bindgen::prelude::*;
 
@@ -174,9 +174,9 @@ impl Code {
     }
 
     pub fn get_decoded_data(&self) -> String {
-        // TODO: this *assumes* that it's in 8-bit-byte (Shift-JIS) encoding,
-        // and that version 4 has a four-bit Mode prefix follewed by an 8-bit
-        // character count.
+        // TODO: this *assumes* that it's in 8-bit-byte (ASCII, but should be
+        // JIS8) encoding, and that version 4 has a four-bit Mode prefix
+        // follewed by an 8-bit character count.
 
         let bytes = self
             .bit_positions
@@ -198,7 +198,11 @@ impl Code {
             })
             .collect::<Vec<u8>>();
 
-        WINDOWS_31J
+        // the encoding is actually JIS8, but assuming that a QR code is a URL
+        // or something ... it'll be in the range where ASCII and JIS8 overlap.
+        // And with ASCII, we won't try to interpret any multi-byte sequences
+        // like we would if we were to erroneously try decoding as Shift-JIS.
+        ASCII
             .decode(&bytes, encoding::DecoderTrap::Replace)
             .expect("Replace should never fail")
     }
