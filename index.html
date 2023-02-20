@@ -24,7 +24,7 @@
             }
         }
 
-        document.getElementById("decoded").innerText = code.get_orig_decoded_data()
+        document.getElementById("decoded").value = code.get_orig_decoded_data()
     </script>
     <style>
         #target {
@@ -62,6 +62,6 @@
 <body>
 <div id="target"></div>
 
-<p>Decoded data [without error correction]: <span id="decoded"></span></p>
+<p>Decoded data [without error correction]: <input type="text" size="60" id="decoded"></p>
 </body>
 </html>
