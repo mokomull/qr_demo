@@ -151,10 +151,10 @@ impl Code {
 
         // For a version 4 code, the bits are in two groups, bytewise, and interleaved.
         // TODO: make this generic across all versions
-        let bit_positions = positions
+        let bit_positions: Vec<_> = positions
             .chunks_exact(8)
             .step_by(2)
-            .interleave(positions.chunks_exact(8).skip(1).step_by(2))
+            .chain(positions.chunks_exact(8).skip(1).step_by(2))
             .flatten()
             .copied()
             .collect();
@@ -182,25 +182,34 @@ impl Code {
             .bit_positions
             .iter()
             .skip(12)
-            .map(|(x, y)| y * 33 + x)
             .tuples()
             .map(|(i1, i2, i3, i4, i5, i6, i7, i8)| {
                 // manually decode a byte, MSB-first
                 #[allow(clippy::bool_to_int_with_if)]
                 // because it doesn't make sense for the 0th bit to be any different
-                (if self.orig_data[i1] { 128 } else { 0 }
-                    + if self.orig_data[i2] { 64 } else { 0 }
-                    + if self.orig_data[i3] { 32 } else { 0 }
-                    + if self.orig_data[i4] { 16 } else { 0 }
-                    + if self.orig_data[i5] { 8 } else { 0 }
-                    + if self.orig_data[i6] { 4 } else { 0 }
-                    + if self.orig_data[i7] { 2 } else { 0 }
-                    + if self.orig_data[i8] { 1 } else { 0 })
+                (if self.bit_at(i1.0, i1.1) { 128 } else { 0 }
+                    + if self.bit_at(i2.0, i2.1) { 64 } else { 0 }
+                    + if self.bit_at(i3.0, i3.1) { 32 } else { 0 }
+                    + if self.bit_at(i4.0, i4.1) { 16 } else { 0 }
+                    + if self.bit_at(i5.0, i5.1) { 8 } else { 0 }
+                    + if self.bit_at(i6.0, i6.1) { 4 } else { 0 }
+                    + if self.bit_at(i7.0, i7.1) { 2 } else { 0 }
+                    + if self.bit_at(i8.0, i8.1) { 1 } else { 0 })
             })
             .collect::<Vec<u8>>();
 
         WINDOWS_31J
             .decode(&bytes, encoding::DecoderTrap::Replace)
             .expect("Replace should never fail")
+    }
+
+    fn bit_at(&self, x: usize, y: usize) -> bool {
+        let dark_module = self.orig_data[y * 33 + x];
+        // TODO: this is hard-coded to mask pattern 010
+        if x % 3 == 0 {
+            !dark_module
+        } else {
+            dark_module
+        }
     }
 }
