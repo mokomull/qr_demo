@@ -1,5 +1,7 @@
 use std::collections::HashMap;
 
+use encoding::{all::WINDOWS_31J, Encoding};
+use itertools::Itertools;
 use wasm_bindgen::prelude::*;
 
 #[cfg(test)]
@@ -119,11 +121,13 @@ pub enum Edge {
 #[wasm_bindgen]
 pub struct Code {
     byte_edges: HashMap<(usize, usize), Vec<Edge>>,
+    bit_positions: Vec<(usize, usize)>,
+    orig_data: Vec<bool>,
 }
 
 #[wasm_bindgen]
 impl Code {
-    pub fn new() -> Code {
+    pub fn new(image: String) -> Code {
         let positions = ReadPosition::default().collect::<Vec<_>>();
         let mut byte_edges = HashMap::<_, Vec<Edge>>::new();
 
@@ -144,7 +148,22 @@ impl Code {
                 }
             }
         }
-        Code { byte_edges }
+
+        // For a version 4 code, the bits are in two groups, bytewise, and interleaved.
+        // TODO: make this generic across all versions
+        let bit_positions = positions
+            .chunks_exact(8)
+            .step_by(2)
+            .interleave(positions.chunks_exact(8).skip(1).step_by(2))
+            .flatten()
+            .copied()
+            .collect();
+
+        Code {
+            byte_edges,
+            bit_positions,
+            orig_data: image.chars().map(|c| c == '1').collect(),
+        }
     }
 
     pub fn get_byte_edges(&self, x: usize, y: usize) -> Vec<JsValue> {
@@ -152,5 +171,36 @@ impl Code {
             .get(&(x, y))
             .map(|v| v.iter().copied().map(JsValue::from).collect())
             .unwrap_or_default()
+    }
+
+    pub fn get_decoded_data(&self) -> String {
+        // TODO: this *assumes* that it's in 8-bit-byte (Shift-JIS) encoding,
+        // and that version 4 has a four-bit Mode prefix follewed by an 8-bit
+        // character count.
+
+        let bytes = self
+            .bit_positions
+            .iter()
+            .skip(12)
+            .map(|(x, y)| y * 33 + x)
+            .tuples()
+            .map(|(i1, i2, i3, i4, i5, i6, i7, i8)| {
+                // manually decode a byte, MSB-first
+                #[allow(clippy::bool_to_int_with_if)]
+                // because it doesn't make sense for the 0th bit to be any different
+                (if self.orig_data[i1] { 128 } else { 0 }
+                    + if self.orig_data[i2] { 64 } else { 0 }
+                    + if self.orig_data[i3] { 32 } else { 0 }
+                    + if self.orig_data[i4] { 16 } else { 0 }
+                    + if self.orig_data[i5] { 8 } else { 0 }
+                    + if self.orig_data[i6] { 4 } else { 0 }
+                    + if self.orig_data[i7] { 2 } else { 0 }
+                    + if self.orig_data[i8] { 1 } else { 0 })
+            })
+            .collect::<Vec<u8>>();
+
+        WINDOWS_31J
+            .decode(&bytes, encoding::DecoderTrap::Replace)
+            .expect("Replace should never fail")
     }
 }
