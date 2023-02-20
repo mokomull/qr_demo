@@ -119,6 +119,7 @@ pub enum Edge {
 }
 
 #[wasm_bindgen]
+#[derive(Clone, Copy)]
 pub enum Color {
     Dark = "dark",
     Light = "light",
@@ -192,6 +193,20 @@ impl Code {
             orig_decoded,
             blocks,
         }
+    }
+
+    pub fn get_color(&self, x: usize, y: usize) -> Result<Color, JsError> {
+        if let Some(&x) = self.overrides.get(&(x, y)) {
+            return Ok(x);
+        }
+        if let Some(&c) = self.orig_data.get(y * 33 + x) {
+            if c {
+                return Ok(Color::Dark);
+            } else {
+                return Ok(Color::Light);
+            }
+        }
+        return Err(JsError::new("x, y out of range"));
     }
 
     pub fn get_byte_edges(&self, x: usize, y: usize) -> Vec<JsValue> {

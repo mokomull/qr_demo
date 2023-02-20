@@ -14,11 +14,7 @@
         for (let x = 0; x < 33; ++x) {
             for (let y = 0; y < 33; ++y) {
                 let module = document.createElement("div");
-                if (image[y*33 + x] == "1") {
-                    module.className = "dark";
-                } else {
-                    module.className = "light";
-                }
+                module.className = code.get_color(x, y)
                 for (let edge of code.get_byte_edges(x, y)) {
                     module.className += " " + edge;
                 }
