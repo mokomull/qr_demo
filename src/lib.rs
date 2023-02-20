@@ -1,3 +1,7 @@
+use std::collections::HashMap;
+
+use wasm_bindgen::prelude::*;
+
 #[cfg(test)]
 mod test;
 
@@ -101,4 +105,52 @@ fn is_forbidden(x: usize, y: usize) -> bool {
     ]
     .into_iter()
     .any(|(xs, ys)| xs.contains(&x) && ys.contains(&y))
+}
+
+#[wasm_bindgen]
+#[derive(Clone, Copy)]
+pub enum Edge {
+    Left = "left",
+    Right = "right",
+    Top = "top",
+    Bottom = "bottom",
+}
+
+#[wasm_bindgen]
+pub struct Code {
+    byte_edges: HashMap<(usize, usize), Vec<Edge>>,
+}
+
+#[wasm_bindgen]
+impl Code {
+    pub fn new() -> Code {
+        let positions = ReadPosition::default().collect::<Vec<_>>();
+        let mut byte_edges = HashMap::<_, Vec<Edge>>::new();
+
+        for locations in positions.chunks(8) {
+            for &(x, y) in locations {
+                let edges = byte_edges.entry((x, y)).or_default();
+                if x == 0 || !locations.contains(&(x - 1, y)) {
+                    edges.push(Edge::Left)
+                }
+                if x == 32 || !locations.contains(&(x + 1, y)) {
+                    edges.push(Edge::Right)
+                }
+                if y == 0 || !locations.contains(&(x, y - 1)) {
+                    edges.push(Edge::Top)
+                }
+                if y == 32 || !locations.contains(&(x, y + 1)) {
+                    edges.push(Edge::Bottom)
+                }
+            }
+        }
+        Code { byte_edges }
+    }
+
+    pub fn get_byte_edges(&self, x: usize, y: usize) -> Vec<JsValue> {
+        self.byte_edges
+            .get(&(x, y))
+            .map(|v| v.iter().copied().map(JsValue::from).collect())
+            .unwrap_or_default()
+    }
 }

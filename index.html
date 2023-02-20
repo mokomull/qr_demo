@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<head>
+    <script type="module">
+        import init, * as rust from "./pkg/qr_demo.js";
+        await init();
+
+        let target = document.getElementById("target");
+        let code = rust.Code.new();
+
+        for (let x = 0; x < 33; ++x) {
+            for (let y = 0; y < 33; ++y) {
+                let module = document.createElement("div");
+                for (let edge of code.get_byte_edges(x, y)) {
+                    module.className += " " + edge;
+                }
+                module.style.setProperty("grid-column", x+1);
+                module.style.setProperty("grid-row", y+1);
+                target.appendChild(module);
+            }
+        }
+    </script>
+    <style>
+        #target {
+            display: grid;
+            grid-template-columns: repeat(33, 1em);
+            grid-template-rows: repeat(33, 1em);
+            gap: 4px;
+        }
+
+        #target .left {
+            border-left: 1px solid lime;
+        }
+
+        #target .right {
+            border-right: 1px solid lime;
+        }
+
+        #target .top {
+            border-top: 1px solid lime;
+        }
+
+        #target .bottom {
+            border-bottom: 1px solid lime;
+        }
+    </style>
+</head>
+<body>
+<div id="target" />
+</body>
+</html>
