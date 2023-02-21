@@ -125,6 +125,7 @@ pub enum Color {
     Light = "light",
     HumanDark = "humandark",
     HumanLight = "humanlight",
+    Corrected = "corrected",
 }
 
 #[wasm_bindgen]
@@ -315,6 +316,25 @@ impl Code {
             let Ok(corrected) = rs.correct(&bytes, None) else {
                 return false;
             };
+
+            let orig_bytes = decode(block, &self.orig_data);
+            for (&locations, (old, new)) in block
+                .iter()
+                .zip(orig_bytes.into_iter().zip(corrected.into_iter()))
+            {
+                for (location, mask) in locations
+                    .into_iter()
+                    .zip([128, 64, 32, 16, 8, 4, 2, 1].into_iter())
+                {
+                    if self.overrides.contains_key(&location) {
+                        // a human set this bit, don't re-color it
+                        continue;
+                    }
+                    if old & mask != new & mask {
+                        self.overrides.insert(location, Color::Corrected);
+                    }
+                }
+            }
         }
         true
     }
