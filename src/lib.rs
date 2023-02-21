@@ -130,7 +130,6 @@ pub enum Color {
 #[wasm_bindgen]
 pub struct Code {
     byte_edges: HashMap<(usize, usize), Vec<Edge>>,
-    bit_positions: Vec<(usize, usize)>,
     overrides: HashMap<(usize, usize), Color>,
     orig_data: Vec<bool>,
     orig_decoded: Vec<u8>,
@@ -183,11 +182,23 @@ impl Code {
             .collect::<Vec<Vec<[(usize, usize); 8]>>>();
 
         let orig_data: Vec<bool> = image.chars().map(|c| c == '1').collect();
-        let orig_decoded = decode(&blocks, 32, &orig_data);
+
+        // take just the plain-text locations out of the blocks, and drop the
+        // first 12 bits... TODO: this *assumes* that it's in 8-bit-byte (ASCII,
+        // but should be JIS8) encoding, and that version 4 has a four-bit Mode
+        // prefix follewed by an 8-bit character count.
+        let plaintext_locations = blocks
+            .iter()
+            .flat_map(|block| block.iter().take(32).flatten())
+            .skip(12)
+            .copied()
+            .tuples()
+            .map(|(a, b, c, d, e, f, g, h)| [a, b, c, d, e, f, g, h])
+            .collect_vec();
+        let orig_decoded = decode(&plaintext_locations, &orig_data);
 
         Code {
             byte_edges,
-            bit_positions,
             overrides: HashMap::new(),
             orig_data,
             orig_decoded,
@@ -227,7 +238,7 @@ impl Code {
             .replace(|c: char| -> bool { !c.is_ascii_graphic() }, "\u{fffd}")
     }
 
-    pub fn update(&mut self, new_data: &str) {
+    pub fn update(&mut self, new_data: &str) -> bool {
         self.overrides = HashMap::new();
 
         let plaintext_bits = self
@@ -285,27 +296,34 @@ impl Code {
                 }
             }
         }
+
+        // incorporate those human colors into it
+        let mut data = self.orig_data.clone();
+        for (&(x, y), &color) in self.overrides.iter() {
+            let bit = match color {
+                Color::HumanDark => true,
+                Color::HumanLight => false,
+                _ => panic!("we only ever put Human* colors into the dictionary"),
+            };
+            data[y * 33 + x] = bit;
+        }
+
+        for block in &self.blocks {
+            let bytes = decode(block, &data);
+            // TODO: 18 error correction bytes, because 4-M is a (50, 32) code
+            let rs = reed_solomon::Decoder::new(18);
+            let Ok(corrected) = rs.correct(&bytes, None) else {
+                return false;
+            };
+        }
+        true
     }
 }
 
-fn decode(
-    blocks: &[Vec<[(usize, usize); 8]>],
-    plaintext_bytes_per_block: usize,
-    data: &[bool],
-) -> Vec<u8> {
-    // TODO: this *assumes* that it's in 8-bit-byte (ASCII, but should be
-    // JIS8) encoding, and that version 4 has a four-bit Mode prefix
-    // follewed by an 8-bit character count.
-
-    let plaintext_bits = blocks
-        .into_iter()
-        .map(|block| block.iter().take(plaintext_bytes_per_block).flatten())
-        .flatten();
-
-    plaintext_bits
-        .skip(12)
-        .tuples()
-        .map(|(i1, i2, i3, i4, i5, i6, i7, i8)| {
+fn decode(byte_locations: &[[(usize, usize); 8]], data: &[bool]) -> Vec<u8> {
+    byte_locations
+        .iter()
+        .map(|&[i1, i2, i3, i4, i5, i6, i7, i8]| {
             // manually decode a byte, MSB-first
             #[allow(clippy::bool_to_int_with_if)]
             // because it doesn't make sense for the 0th bit to be any different

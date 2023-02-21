@@ -30,7 +30,12 @@
 
         let decoded = document.getElementById("decoded");
         decoded.addEventListener("input", function() {
-            code.update(decoded.value);
+            let status = document.getElementById("errorstatus");
+            if (code.update(decoded.value)) {
+                status.innerText = "CORRECTED!  Try scanning it!";
+            } else {
+                status.innerText = "still needs more help";
+            }
             render();
         });
         decoded.value = code.get_orig_decoded_data();
@@ -82,5 +87,7 @@
 
 <p>Edit to see how it changes the QR code [disregarding error correction]:<br>
 <input type="text" size="60" id="decoded"></p>
+
+<p>Error correction status: <span id="errorstatus">you should start editing</span></p>
 </body>
 </html>
