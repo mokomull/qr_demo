@@ -49,23 +49,23 @@
             margin: 4em
         }
 
-        #target .dark {
+        .dark {
             background-color: black;
         }
 
-        #target .light {
+        .light {
             background-color: white;
         }
 
-        #target .humandark {
+        .humandark {
             background-color: #500;
         }
 
-        #target .humanlight {
+        .humanlight {
             background-color: yellow;
         }
 
-        #target .corrected {
+        .corrected {
             background-color: red;
         }
 
@@ -84,6 +84,22 @@
         #target .bottom {
             border-bottom: 1px solid orange;
         }
+
+        .legend {
+            display: inline grid;
+            grid-template-columns: 1em;
+            grid-template-rows: 1em;
+            margin-left: 2em;
+        }
+
+        .legend div {
+            grid-row: 0;
+            grid-column: 0;
+        }
+
+        .legend .light, .legend .humanlight, .legend .corrected {
+            border: 1px solid black;
+        }
     </style>
 </head>
 <body>
@@ -93,5 +109,13 @@
 <input type="text" size="60" id="decoded"></p>
 
 <p>Error correction status: <span id="errorstatus">you should start editing</span></p>
+
+<p>Legend:
+    <div class="legend"><div class="dark"></div></div> - this module was dark in the original image<br>
+    <div class="legend"><div class="light"></div></div> - this module was light in the original image<br>
+    <div class="legend"><div class="humandark"></div></div> - the human edits turned this module dark<br>
+    <div class="legend"><div class="humanlight"></div></div> - the human edits turned this module light<br>
+    <div class="legend"><div class="corrected"></div></div> - this module was automatically fixed by Reed-Solomon<br>
+</p>
 </body>
 </html>
