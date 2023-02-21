@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use encoding::{all::ASCII, Encoding};
+use encoding::{all::ASCII, EncoderTrap, Encoding};
 use itertools::Itertools;
 use wasm_bindgen::prelude::*;
 
@@ -225,6 +225,66 @@ impl Code {
             .decode(&self.orig_decoded, encoding::DecoderTrap::Replace)
             .expect("Replace should never fail")
             .replace(|c: char| -> bool { !c.is_ascii_graphic() }, "\u{fffd}")
+    }
+
+    pub fn update(&mut self, new_data: &str) {
+        self.overrides = HashMap::new();
+
+        let plaintext_bits = self
+            .blocks
+            .iter()
+            .map(|block| block.iter().take(32).flatten())
+            .flatten();
+
+        let plaintext_locations: Vec<[(usize, usize); 8]> = plaintext_bits
+            .skip(12)
+            .chunks(8)
+            .into_iter()
+            .filter_map(|c| c.copied().collect_vec().try_into().ok())
+            .collect();
+
+        for (locations, (orig, new)) in plaintext_locations
+            .into_iter()
+            .zip(self.orig_decoded.iter().zip(new_data.chars()))
+        {
+            // if it's the replacement character or anything else that won't fit
+            // in one byte, then don't count it as a change
+            let Ok(new_value) = ASCII.encode(&new.to_string(), EncoderTrap::Strict) else {
+                continue;
+            };
+
+            if new_value.len() != 1 {
+                // this shouldn't happen because the ASCII encoder can't handle
+                // multi-byte, but handle it anyway
+                continue;
+            }
+
+            for (&location, bitmask) in locations
+                .iter()
+                .zip([128, 64, 32, 16, 8, 4, 2, 1].into_iter())
+            {
+                if orig & bitmask > 0 && new_value[0] & bitmask == 0 {
+                    // was a 1 bit, but should be 0
+                    if location.0 % 3 == 0 {
+                        // 0 bit is *dark*, because we hit the mask
+                        self.overrides.insert(location, Color::HumanDark);
+                    } else {
+                        // 0 bit is light, as is typical
+                        self.overrides.insert(location, Color::HumanLight);
+                    }
+                }
+                if orig & bitmask == 0 && new_value[0] & bitmask > 0 {
+                    // was a 0 bit, but should be 1
+                    if location.0 % 3 == 0 {
+                        // 1 bit is *light*, because we hit the mask
+                        self.overrides.insert(location, Color::HumanLight);
+                    } else {
+                        // 1 bit is dark, as is typical
+                        self.overrides.insert(location, Color::HumanDark);
+                    }
+                }
+            }
+        }
     }
 }
 

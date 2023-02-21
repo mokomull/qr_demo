@@ -11,20 +11,30 @@
 
         let code = rust.Code.new(image);
 
-        for (let x = 0; x < 33; ++x) {
-            for (let y = 0; y < 33; ++y) {
-                let module = document.createElement("div");
-                module.className = code.get_color(x, y)
-                for (let edge of code.get_byte_edges(x, y)) {
-                    module.className += " " + edge;
+        function render() {
+            target.innerHTML = ""
+
+            for (let x = 0; x < 33; ++x) {
+                for (let y = 0; y < 33; ++y) {
+                    let module = document.createElement("div");
+                    module.className = code.get_color(x, y)
+                    for (let edge of code.get_byte_edges(x, y)) {
+                        module.className += " " + edge;
+                    }
+                    module.style.setProperty("grid-column", x+1);
+                    module.style.setProperty("grid-row", y+1);
+                    target.appendChild(module);
                 }
-                module.style.setProperty("grid-column", x+1);
-                module.style.setProperty("grid-row", y+1);
-                target.appendChild(module);
             }
         }
 
-        document.getElementById("decoded").value = code.get_orig_decoded_data()
+        let decoded = document.getElementById("decoded");
+        decoded.addEventListener("input", function() {
+            code.update(decoded.value);
+            render();
+        });
+        decoded.value = code.get_orig_decoded_data();
+        render();
     </script>
     <style>
         #target {
@@ -40,6 +50,14 @@
 
         #target .light {
             background-color: white;
+        }
+
+        #target .humandark {
+            background-color: #500;
+        }
+
+        #target .humanlight {
+            background-color: yellow;
         }
 
         #target .left {
@@ -62,6 +80,7 @@
 <body>
 <div id="target"></div>
 
-<p>Decoded data [without error correction]: <input type="text" size="60" id="decoded"></p>
+<p>Edit to see how it changes the QR code [disregarding error correction]:<br>
+<input type="text" size="60" id="decoded"></p>
 </body>
 </html>
