@@ -325,7 +325,7 @@ impl Code {
             {
                 if orig & bitmask > 0 && new_value[0] & bitmask == 0 {
                     // was a 1 bit, but should be 0
-                    if location.0 % 3 == 0 {
+                    if is_masked(location) {
                         // 0 bit is *dark*, because we hit the mask
                         self.overrides.insert(location, Color::HumanDark);
                     } else {
@@ -335,7 +335,7 @@ impl Code {
                 }
                 if orig & bitmask == 0 && new_value[0] & bitmask > 0 {
                     // was a 0 bit, but should be 1
-                    if location.0 % 3 == 0 {
+                    if is_masked(location) {
                         // 1 bit is *light*, because we hit the mask
                         self.overrides.insert(location, Color::HumanLight);
                     } else {
@@ -410,10 +410,14 @@ fn decode(spec: &CodeSpec, byte_locations: &[[(usize, usize); 8]], data: &[bool]
         .collect::<Vec<u8>>()
 }
 
+fn is_masked((x, _y): (usize, usize)) -> bool {
+    x % 3 == 0
+}
+
 fn bit_at(spec: &CodeSpec, data: &[bool], x: usize, y: usize) -> bool {
     let dark_module = data[y * spec.size + x];
     // TODO: this is hard-coded to mask pattern 010
-    if x % 3 == 0 {
+    if is_masked((x, y)) {
         !dark_module
     } else {
         dark_module
