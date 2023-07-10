@@ -7,19 +7,76 @@ use wasm_bindgen::prelude::*;
 #[cfg(test)]
 mod test;
 
+struct CodeSpec {
+    size: usize,
+    alignment_center_coordinates: &'static [usize],
+    reed_solomon_blocks: &'static [(usize, usize)],
+}
+
+static VERSION_4M: &'static CodeSpec = &CodeSpec {
+    size: 33,
+    alignment_center_coordinates: &[6, 26],
+    reed_solomon_blocks: &[(50, 32); 2],
+};
+
 struct ReadPosition {
+    code: &'static CodeSpec,
     x: isize,
     y: isize,
     up: bool,
 }
 
-impl Default for ReadPosition {
-    fn default() -> Self {
+impl ReadPosition {
+    fn new(code: &'static CodeSpec) -> Self {
         ReadPosition {
-            x: 31,
-            y: 33,
+            code,
+            // place the pointer moving upwards, in the next-to-last column, just off the bottom of the code
+            // (i.e. so that its first next() will move it to the exact bottom-right of the code).
+            x: code.size as isize - 2,
+            y: code.size as isize,
             up: true,
         }
+    }
+
+    fn is_forbidden(&self, x: usize, y: usize) -> bool {
+        let size = self.code.size;
+
+        let position_detection = [
+            (0..9, 0..9),             // top left locating and format
+            ((size - 8)..size, 0..9), // top right locating and format
+            (0..9, (size - 8)..size), // bottom left locating and format
+        ];
+
+        // note for next time you have to read this: .. is the "up-to-but-not-including" operator.
+        position_detection
+            .iter()
+            .cloned()
+            .chain(
+                [
+                    (0..size, 6..7), // horizontal timing
+                    (6..7, 0..size), // vertical timing
+                ]
+                .into_iter(),
+            )
+            .chain(
+                // alignment patterns
+                self.code
+                    .alignment_center_coordinates
+                    .into_iter()
+                    .cartesian_product(self.code.alignment_center_coordinates.into_iter())
+                    .filter_map(|(x, y)| {
+                        // skip the alignment patterns whose centers are within the position-detection regions
+                        if position_detection
+                            .iter()
+                            .any(|(xs, ys)| xs.contains(&x) && ys.contains(&y))
+                        {
+                            None
+                        } else {
+                            Some(((x - 2)..(x + 3), (y - 2)..(y + 3)))
+                        }
+                    }),
+            )
+            .any(|(xs, ys)| xs.contains(&x) && ys.contains(&y))
     }
 }
 
@@ -61,7 +118,7 @@ impl Iterator for ReadPosition {
             assert!(self.up); // we shouldn't go off the top if we weren't headed up
             self.up = false;
             off_end = true;
-        } else if probey > 32 {
+        } else if probey >= self.code.size as isize {
             assert!(!self.up); // we shouldn't go off the bottom if we were headed up
             self.up = true;
             off_end = true;
@@ -88,25 +145,12 @@ impl Iterator for ReadPosition {
         let probex = usize::try_from(probex).expect("x should not be negative by here");
         let probey = usize::try_from(probey).expect("y should not be negative by here");
 
-        if is_forbidden(probex, probey) {
+        if self.is_forbidden(probex, probey) {
             return self.next();
         }
 
         Some((probex, probey))
     }
-}
-
-fn is_forbidden(x: usize, y: usize) -> bool {
-    [
-        (0..9, 0..9),     // top left locating and format
-        (25..33, 0..9),   // top right locating and format
-        (0..9, 25..33),   // bottom left locating and format
-        (0..33, 6..7),    // horizontal timing
-        (6..7, 0..33),    // vertical timing
-        (24..29, 24..29), // bottom right alignment
-    ]
-    .into_iter()
-    .any(|(xs, ys)| xs.contains(&x) && ys.contains(&y))
 }
 
 #[wasm_bindgen]
@@ -130,6 +174,10 @@ pub enum Color {
 
 #[wasm_bindgen]
 pub struct Code {
+    spec: &'static CodeSpec,
+
+    plaintext_locations: Vec<[(usize, usize); 8]>,
+
     byte_edges: HashMap<(usize, usize), Vec<Edge>>,
     overrides: HashMap<(usize, usize), Color>,
     orig_data: Vec<bool>,
@@ -143,7 +191,8 @@ pub struct Code {
 #[wasm_bindgen]
 impl Code {
     pub fn new(image: String) -> Code {
-        let positions = ReadPosition::default().collect::<Vec<_>>();
+        let spec = VERSION_4M;
+        let positions = ReadPosition::new(spec).collect::<Vec<_>>();
         let mut byte_edges = HashMap::<_, Vec<Edge>>::new();
 
         for locations in positions.chunks(8) {
@@ -152,35 +201,40 @@ impl Code {
                 if x == 0 || !locations.contains(&(x - 1, y)) {
                     edges.push(Edge::Left)
                 }
-                if x == 32 || !locations.contains(&(x + 1, y)) {
+                if x == (spec.size - 1) || !locations.contains(&(x + 1, y)) {
                     edges.push(Edge::Right)
                 }
                 if y == 0 || !locations.contains(&(x, y - 1)) {
                     edges.push(Edge::Top)
                 }
-                if y == 32 || !locations.contains(&(x, y + 1)) {
+                if y == (spec.size - 1) || !locations.contains(&(x, y + 1)) {
                     edges.push(Edge::Bottom)
                 }
             }
         }
 
-        // For a version 4 code, the bits are in two groups, bytewise, and interleaved.
-        // TODO: make this generic across all versions
-        let bit_positions: Vec<_> = positions
+        // For a code with multiple Reed-Solomon blocks, the individual codewords are interleaved.
+        let codeword_positions: Vec<[(usize, usize); 8]> = positions
             .chunks_exact(8)
-            .step_by(2)
-            .chain(positions.chunks_exact(8).skip(1).step_by(2))
-            .flatten()
-            .copied()
+            .map(|i| i.try_into().expect("8 positions must fit in a [_; 8]...()"))
             .collect();
 
-        let blocks = bit_positions
-            .chunks_exact(8)
-            .map(|x| x.try_into().expect("8 positions must fit in a [_; 8]..."))
-            .collect::<Vec<_>>()
-            .chunks_exact(50)
-            .map(|x| x.to_vec())
-            .collect::<Vec<Vec<[(usize, usize); 8]>>>();
+        let blocks = spec
+            .reed_solomon_blocks
+            .iter()
+            .enumerate()
+            .map(|(i, &(length, _))| {
+                // TODO: this will probably fail on versions which have multiple differently-sized
+                // Reed-Solomon blocks, since the spec says that all of the data words come first.
+                codeword_positions
+                    .iter()
+                    .skip(i) // the Reed-Solomon blocks are interleaved in the QR code
+                    .step_by(spec.reed_solomon_blocks.len())
+                    .take(length)
+                    .copied()
+                    .collect_vec()
+            })
+            .collect_vec();
 
         let orig_data: Vec<bool> = image.chars().map(|c| c == '1').collect();
 
@@ -188,17 +242,23 @@ impl Code {
         // first 12 bits... TODO: this *assumes* that it's in 8-bit-byte (ASCII,
         // but should be JIS8) encoding, and that version 4 has a four-bit Mode
         // prefix follewed by an 8-bit character count.
+        assert!(blocks.len() == spec.reed_solomon_blocks.len());
         let plaintext_locations = blocks
             .iter()
-            .flat_map(|block| block.iter().take(32).flatten())
-            .skip(12)
+            .zip(spec.reed_solomon_blocks.iter())
+            .flat_map(|(positions, &(_length, plaintext_count))| {
+                positions.iter().take(plaintext_count).flatten()
+            })
+            .skip(12) // 4 bits for type and 8 bits for count; TODO: handle larger codes
             .copied()
             .tuples()
             .map(|(a, b, c, d, e, f, g, h)| [a, b, c, d, e, f, g, h])
             .collect_vec();
-        let orig_decoded = decode(&plaintext_locations, &orig_data);
+        let orig_decoded = decode(spec, &plaintext_locations, &orig_data);
 
         Code {
+            spec,
+            plaintext_locations,
             byte_edges,
             overrides: HashMap::new(),
             orig_data,
@@ -211,7 +271,7 @@ impl Code {
         if let Some(&x) = self.overrides.get(&(x, y)) {
             return Ok(x);
         }
-        if let Some(&c) = self.orig_data.get(y * 33 + x) {
+        if let Some(&c) = self.orig_data.get(y * self.spec.size + x) {
             if c {
                 return Ok(Color::Dark);
             } else {
@@ -242,21 +302,9 @@ impl Code {
     pub fn update(&mut self, new_data: &str) -> bool {
         self.overrides = HashMap::new();
 
-        let plaintext_bits = self
-            .blocks
+        for (locations, (orig, new)) in self
+            .plaintext_locations
             .iter()
-            .map(|block| block.iter().take(32).flatten())
-            .flatten();
-
-        let plaintext_locations: Vec<[(usize, usize); 8]> = plaintext_bits
-            .skip(12)
-            .chunks(8)
-            .into_iter()
-            .filter_map(|c| c.copied().collect_vec().try_into().ok())
-            .collect();
-
-        for (locations, (orig, new)) in plaintext_locations
-            .into_iter()
             .zip(self.orig_decoded.iter().zip(new_data.chars()))
         {
             // if it's the replacement character or anything else that won't fit
@@ -306,18 +354,19 @@ impl Code {
                 Color::HumanLight => false,
                 _ => panic!("we only ever put Human* colors into the dictionary"),
             };
-            data[y * 33 + x] = bit;
+            data[y * self.spec.size + x] = bit;
         }
 
-        for block in &self.blocks {
-            let bytes = decode(block, &data);
-            // TODO: 18 error correction bytes, because 4-M is a (50, 32) code
-            let rs = reed_solomon::Decoder::new(18);
+        for ((block_len, plaintext_len), block) in
+            self.spec.reed_solomon_blocks.iter().zip(&self.blocks)
+        {
+            let bytes = decode(self.spec, block, &data);
+            let rs = reed_solomon::Decoder::new(block_len - plaintext_len);
             let Ok(corrected) = rs.correct(&bytes, None) else {
                 return false;
             };
 
-            let orig_bytes = decode(block, &self.orig_data);
+            let orig_bytes = decode(self.spec, block, &self.orig_data);
             for (&locations, (old, new)) in block
                 .iter()
                 .zip(orig_bytes.into_iter().zip(corrected.into_iter()))
@@ -340,27 +389,29 @@ impl Code {
     }
 }
 
-fn decode(byte_locations: &[[(usize, usize); 8]], data: &[bool]) -> Vec<u8> {
+fn decode(spec: &CodeSpec, byte_locations: &[[(usize, usize); 8]], data: &[bool]) -> Vec<u8> {
+    let get_bit = |x, y| bit_at(spec, data, x, y);
+
     byte_locations
         .iter()
         .map(|&[i1, i2, i3, i4, i5, i6, i7, i8]| {
             // manually decode a byte, MSB-first
             #[allow(clippy::bool_to_int_with_if)]
             // because it doesn't make sense for the 0th bit to be any different
-            (if bit_at(data, i1.0, i1.1) { 128 } else { 0 }
-                + if bit_at(data, i2.0, i2.1) { 64 } else { 0 }
-                + if bit_at(data, i3.0, i3.1) { 32 } else { 0 }
-                + if bit_at(data, i4.0, i4.1) { 16 } else { 0 }
-                + if bit_at(data, i5.0, i5.1) { 8 } else { 0 }
-                + if bit_at(data, i6.0, i6.1) { 4 } else { 0 }
-                + if bit_at(data, i7.0, i7.1) { 2 } else { 0 }
-                + if bit_at(data, i8.0, i8.1) { 1 } else { 0 })
+            (if get_bit(i1.0, i1.1) { 128 } else { 0 }
+                + if get_bit(i2.0, i2.1) { 64 } else { 0 }
+                + if get_bit(i3.0, i3.1) { 32 } else { 0 }
+                + if get_bit(i4.0, i4.1) { 16 } else { 0 }
+                + if get_bit(i5.0, i5.1) { 8 } else { 0 }
+                + if get_bit(i6.0, i6.1) { 4 } else { 0 }
+                + if get_bit(i7.0, i7.1) { 2 } else { 0 }
+                + if get_bit(i8.0, i8.1) { 1 } else { 0 })
         })
         .collect::<Vec<u8>>()
 }
 
-fn bit_at(data: &[bool], x: usize, y: usize) -> bool {
-    let dark_module = data[y * 33 + x];
+fn bit_at(spec: &CodeSpec, data: &[bool], x: usize, y: usize) -> bool {
+    let dark_module = data[y * spec.size + x];
     // TODO: this is hard-coded to mask pattern 010
     if x % 3 == 0 {
         !dark_module
