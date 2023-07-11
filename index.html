@@ -14,8 +14,9 @@
         let decoded = document.getElementById("decoded");
         let status = document.getElementById("errorstatus");
         function updateErrorCorrection() {
-            if (code.update(decoded.value)) {
-                status.innerText = "CORRECTED!  Try scanning it!";
+            let result = code.update(decoded.value);
+            if (result) {
+                status.innerText = "CORRECTED!  Try scanning it!  It should be " + result;
             } else {
                 status.innerText = "still needs more help";
             }

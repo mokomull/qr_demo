@@ -465,7 +465,7 @@ impl Code {
         Ok(())
     }
 
-    pub fn update(&mut self, new_data: &str) -> bool {
+    pub fn update(&mut self, new_data: &str) -> String {
         self.overrides = HashMap::new();
 
         for (locations, (orig, new)) in self
@@ -536,7 +536,7 @@ impl Code {
             let rs = reed_solomon::Decoder::new(block_len - plaintext_len);
 
             let Ok(corrected) = rs.correct(&bytes, Some(&unknown_indexes.iter().map(|&idx| idx as u8).collect_vec())) else {
-                return false;
+                return String::new();
             };
 
             let orig_bytes = decode(self.spec, block, &self.orig_data);
@@ -555,10 +555,21 @@ impl Code {
                     if old & mask != new & mask {
                         self.overrides.insert(location, Color::Corrected);
                     }
+
+                    let bit = &mut data[location.1 * self.spec.size + location.0];
+                    *bit = (new & mask) > 0;
+                    if is_masked(location) {
+                        *bit = !*bit;
+                    }
                 }
             }
         }
-        true
+
+        let new_decoded = decode(self.spec, &self.plaintext_locations, &data);
+        ASCII
+            .decode(&new_decoded, encoding::DecoderTrap::Replace)
+            .expect("Replace should never fail")
+            .replace(|c: char| -> bool { !c.is_ascii_graphic() }, "\u{fffd}")
     }
 }
 
