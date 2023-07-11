@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use encoding::{all::ASCII, EncoderTrap, Encoding};
 use itertools::Itertools;
@@ -180,6 +180,7 @@ pub struct Code {
 
     byte_edges: HashMap<(usize, usize), Vec<Edge>>,
     overrides: HashMap<(usize, usize), Color>,
+    unknown_indexes: Vec<HashSet<usize>>, // indexes into each element of [blocks]
     orig_data: Vec<bool>,
     orig_decoded: Vec<u8>,
 
@@ -261,6 +262,7 @@ impl Code {
             plaintext_locations,
             byte_edges,
             overrides: HashMap::new(),
+            unknown_indexes: vec![HashSet::new(); blocks.len()],
             orig_data,
             orig_decoded,
             blocks,
@@ -281,6 +283,18 @@ impl Code {
         return Err(JsError::new("x, y out of range"));
     }
 
+    pub fn is_unknown(&self, x: usize, y: usize) -> bool {
+        for (i, unknown_indexes) in self.unknown_indexes.iter().enumerate() {
+            for &j in unknown_indexes {
+                if self.blocks[i][j].contains(&(x, y)) {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
     pub fn get_byte_edges(&self, x: usize, y: usize) -> Vec<JsValue> {
         self.byte_edges
             .get(&(x, y))
@@ -297,6 +311,29 @@ impl Code {
             .decode(&self.orig_decoded, encoding::DecoderTrap::Replace)
             .expect("Replace should never fail")
             .replace(|c: char| -> bool { !c.is_ascii_graphic() }, "\u{fffd}")
+    }
+
+    pub fn toggle_unknown(&mut self, x: usize, y: usize) -> Result<(), JsError> {
+        let (block_unknowns, index) = self
+            .blocks
+            .iter()
+            .zip(self.unknown_indexes.iter_mut())
+            .filter_map(|(block, block_unknowns)| {
+                block
+                    .iter()
+                    .position(|byte| byte.contains(&(x, y)))
+                    .map(|index| (block_unknowns, index))
+            })
+            .next()
+            .ok_or_else(|| JsError::new("toggle_unknown on an unknown module"))?;
+
+        if block_unknowns.contains(&index) {
+            block_unknowns.remove(&index);
+        } else {
+            block_unknowns.insert(index);
+        }
+
+        Ok(())
     }
 
     pub fn update(&mut self, new_data: &str) -> bool {
@@ -357,12 +394,17 @@ impl Code {
             data[y * self.spec.size + x] = bit;
         }
 
-        for ((block_len, plaintext_len), block) in
-            self.spec.reed_solomon_blocks.iter().zip(&self.blocks)
+        for (((block_len, plaintext_len), block), unknown_indexes) in self
+            .spec
+            .reed_solomon_blocks
+            .iter()
+            .zip(&self.blocks)
+            .zip(&self.unknown_indexes)
         {
             let bytes = decode(self.spec, block, &data);
             let rs = reed_solomon::Decoder::new(block_len - plaintext_len);
-            let Ok(corrected) = rs.correct(&bytes, None) else {
+
+            let Ok(corrected) = rs.correct(&bytes, Some(&unknown_indexes.iter().map(|&idx| idx as u8).collect_vec())) else {
                 return false;
             };
 

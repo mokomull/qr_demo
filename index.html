@@ -11,6 +11,25 @@
 
         let code = rust.Code.new(image);
 
+        let decoded = document.getElementById("decoded");
+        let status = document.getElementById("errorstatus");
+        function updateErrorCorrection() {
+            if (code.update(decoded.value)) {
+                status.innerText = "CORRECTED!  Try scanning it!";
+            } else {
+                status.innerText = "still needs more help";
+            }
+        }
+
+        function click() {
+            let x = this.style.getPropertyValue("grid-column") - 1;
+            let y = this.style.getPropertyValue("grid-row") - 1;
+            code.toggle_unknown(x, y);
+            updateErrorCorrection();
+            render();
+        }
+
+
         function render() {
             target.innerHTML = ""
 
@@ -21,21 +40,19 @@
                     for (let edge of code.get_byte_edges(x, y)) {
                         module.className += " " + edge;
                     }
-                    module.style.setProperty("grid-column", x+1);
-                    module.style.setProperty("grid-row", y+1);
+                    if (code.is_unknown(x, y)) {
+                        module.className += " unknown";
+                    }
+                    module.style.setProperty("grid-column", x + 1);
+                    module.style.setProperty("grid-row", y + 1);
+                    module.addEventListener("click", click);
                     target.appendChild(module);
                 }
             }
         }
 
-        let decoded = document.getElementById("decoded");
-        decoded.addEventListener("input", function() {
-            let status = document.getElementById("errorstatus");
-            if (code.update(decoded.value)) {
-                status.innerText = "CORRECTED!  Try scanning it!";
-            } else {
-                status.innerText = "still needs more help";
-            }
+        decoded.addEventListener("input", function () {
+            updateErrorCorrection();
             render();
         });
         decoded.value = code.get_orig_decoded_data();
@@ -67,6 +84,10 @@
 
         .corrected {
             background-color: red;
+        }
+
+        .unknown {
+            filter: opacity(75%);
         }
 
         #target .left {
