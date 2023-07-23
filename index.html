@@ -16,7 +16,12 @@
         function updateErrorCorrection() {
             let result = code.update(decoded.value);
             if (result) {
-                status.innerText = "CORRECTED!  Try scanning it!  It should be " + result;
+                status.innerText = "CORRECTED!  Try scanning it!  It should be:";
+                let decoded_text = document.createElement("span");
+                decoded_text.className = "decoded_text";
+                decoded_text.innerText = result;
+                status.appendChild(document.createElement("br"));
+                status.appendChild(decoded_text);
             } else {
                 status.innerText = "still needs more help";
             }
@@ -68,7 +73,7 @@
             margin: 4em
         }
 
-        input {
+        input, .decoded_text {
             font-family: monospace;
         }
 
