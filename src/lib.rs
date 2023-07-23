@@ -594,3 +594,9 @@ fn bit_at(spec: &CodeSpec, data: &[bool], x: usize, y: usize) -> bool {
         dark_module
     }
 }
+
+#[wasm_bindgen(start)]
+pub fn main() {
+    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+    console_log::init().unwrap();
+}
