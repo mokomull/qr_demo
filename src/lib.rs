@@ -19,6 +19,131 @@ static VERSION_4M: &'static CodeSpec = &CodeSpec {
     reed_solomon_blocks: &[(50, 32); 2],
 };
 
+impl CodeSpec {
+    fn correct_format_bits(&self, data: &[bool]) -> HashMap<(usize, usize), Color> {
+        // locations from most-significant-bit to least-.
+        let first_copy_locations: [(usize, usize); 15] = [
+            (0, 8),
+            (1, 8),
+            (2, 8),
+            (3, 8),
+            (4, 8),
+            (5, 8),
+            (7, 8),
+            (8, 8),
+            (8, 7),
+            (8, 5),
+            (8, 4),
+            (8, 3),
+            (8, 2),
+            (8, 1),
+            (8, 0),
+        ];
+
+        let second_copy_locations: [(usize, usize); 15] = [
+            (8, self.size - 1),
+            (8, self.size - 2),
+            (8, self.size - 3),
+            (8, self.size - 4),
+            (8, self.size - 5),
+            (8, self.size - 6),
+            (8, self.size - 7),
+            (self.size - 8, 8),
+            (self.size - 7, 8),
+            (self.size - 6, 8),
+            (self.size - 5, 8),
+            (self.size - 4, 8),
+            (self.size - 3, 8),
+            (self.size - 2, 8),
+            (self.size - 1, 8),
+        ];
+
+        // try all 2^15 combinations to see which ones might possibly pass error correction
+        let mut possible_decodings = Vec::new();
+        for i in 0..(1 << 15) {
+            let format_bits: [bool; 15] = (0..15)
+                .map(|bit_number| {
+                    if i & (1 << bit_number) != 0 {
+                        first_copy_locations[bit_number]
+                    } else {
+                        second_copy_locations[bit_number]
+                    }
+                })
+                .map(|(x, y)| data[y * self.size + x])
+                .collect_vec()
+                .try_into()
+                .expect("fifteen items must by definition fit into() a [_; 15]");
+
+            if let Some(x) = try_correct_format_bits(unmask_format(format_bits)) {
+                possible_decodings.push(x)
+            }
+        }
+
+        if !possible_decodings.is_empty()
+            && possible_decodings
+                .iter()
+                .all(|x| x == &possible_decodings[0])
+        {
+            let modules = unmask_format(possible_decodings[0]);
+            first_copy_locations
+                .into_iter()
+                .zip(second_copy_locations.into_iter())
+                .zip(modules.into_iter())
+                .flat_map(|((first, second), desired)| {
+                    [first, second].into_iter().filter_map(move |(x, y)| {
+                        if data[y * self.size + x] != desired {
+                            Some(((x, y), Color::Corrected))
+                        } else {
+                            None
+                        }
+                    })
+                })
+                .collect()
+        } else {
+            // either there weren't any decodes, or there was not a unique one
+            HashMap::new()
+        }
+    }
+}
+
+/// Tries to correct the 15-bit code for the format information; this operates on unmasked bits.  The XOR with
+/// 0b101010000010010 must happen outside this function.
+fn try_correct_format_bits(data: [bool; 15]) -> Option<[bool; 15]> {
+    // TODO: math to actually find errors
+
+    // but maybe one or more of the combinations is actually a valid codeword of the BCH code
+
+    // implement manual long-division by x^10 + x^8 + x^5 + x^4 + x^2 + x + 1
+    let polynomial: [bool; 11] = [
+        true, false, true, false, false, true, true, false, true, true, true,
+    ];
+    let mut remainder = data.clone();
+    while let Some(i) = remainder.iter().position(|&x| x) {
+        if i > 4 {
+            // once we're past the fifth element, then we're at a smaller degree than x^10, and thus have a
+            // nonzero remainder.  This `data` is thus an invalid codeword.
+            return None;
+        }
+        // subtract the polynomial, which over GF(2) is equivalent to just XOR'ing the elements piecewise.
+        for (bit, monomial) in remainder.iter_mut().skip(i).zip(polynomial) {
+            *bit ^= monomial
+        }
+    }
+    // if no positions are true, then we have a zero remainder, and thus are a proper multiple of the
+    // polynomial.
+    Some(data)
+}
+
+fn unmask_format(data: [bool; 15]) -> [bool; 15] {
+    let xor_mask: [u8; 15] = [1, 0, 1, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0, 1, 0];
+    data.into_iter()
+        .zip(xor_mask)
+        .map(|(bit, mask)| bit ^ (mask != 0))
+        .collect_vec()
+        .try_into()
+        .expect("everything in this function is 15 elements long; this can't fail")
+}
+
 struct ReadPosition {
     code: &'static CodeSpec,
     x: isize,
@@ -180,6 +305,7 @@ pub struct Code {
 
     byte_edges: HashMap<(usize, usize), Vec<Edge>>,
     overrides: HashMap<(usize, usize), Color>,
+    format_overrides: HashMap<(usize, usize), Color>,
     unknown_indexes: Vec<HashSet<usize>>, // indexes into each element of [blocks]
     orig_data: Vec<bool>,
     orig_decoded: Vec<u8>,
@@ -257,11 +383,14 @@ impl Code {
             .collect_vec();
         let orig_decoded = decode(spec, &plaintext_locations, &orig_data);
 
+        let format_overrides = spec.correct_format_bits(&orig_data);
+
         Code {
             spec,
             plaintext_locations,
             byte_edges,
-            overrides: HashMap::new(),
+            overrides: format_overrides.clone(),
+            format_overrides,
             unknown_indexes: vec![HashSet::new(); blocks.len()],
             orig_data,
             orig_decoded,
@@ -337,7 +466,7 @@ impl Code {
     }
 
     pub fn update(&mut self, new_data: &str) -> bool {
-        self.overrides = HashMap::new();
+        self.overrides = self.format_overrides.clone();
 
         for (locations, (orig, new)) in self
             .plaintext_locations
