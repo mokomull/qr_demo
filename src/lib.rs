@@ -573,8 +573,18 @@ impl Code {
         }
 
         let new_decoded = decode(self.spec, &self.plaintext_locations, &data);
+        let first_block = decode(self.spec, &self.blocks[0], &data);
+        let mode = first_block[0] >> 4; // top four bits of the first byte
+        let length = if mode == 0b0100 {
+            // "8-bit byte" mode, so it'll be an 8-bit (TODO) character count, in the bottom four bits of
+            // first byte, and top four bits of second byte
+            (((first_block[0] & 0xF) << 4) | (first_block[1] >> 4)) as usize
+        } else {
+            // if it's any other mode, decoding is completely broken anyway so just dump all of the data 🤷
+            new_decoded.len()
+        };
         ASCII
-            .decode(&new_decoded, encoding::DecoderTrap::Replace)
+            .decode(&new_decoded[..length], encoding::DecoderTrap::Replace)
             .expect("Replace should never fail")
             .replace(|c: char| -> bool { !c.is_ascii_graphic() }, "\u{fffd}")
     }
