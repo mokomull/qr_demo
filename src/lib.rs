@@ -525,6 +525,8 @@ impl Code {
 
         self.overrides.extend(self.format_overrides.iter());
 
+        let mut some_failed = false;
+
         for (((block_len, plaintext_len), block), unknown_indexes) in self
             .spec
             .reed_solomon_blocks
@@ -536,7 +538,8 @@ impl Code {
             let rs = reed_solomon::Decoder::new(block_len - plaintext_len);
 
             let Ok(corrected) = rs.correct(&bytes, Some(&unknown_indexes.iter().map(|&idx| idx as u8).collect_vec())) else {
-                return String::new();
+                some_failed = true;
+                continue;
             };
 
             let orig_bytes = decode(self.spec, block, &self.orig_data);
@@ -563,6 +566,10 @@ impl Code {
                     }
                 }
             }
+        }
+
+        if some_failed {
+            return String::new();
         }
 
         let new_decoded = decode(self.spec, &self.plaintext_locations, &data);
