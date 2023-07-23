@@ -57,6 +57,7 @@
             render();
         });
         decoded.value = code.get_orig_decoded_data();
+        document.getElementById("original").value = code.get_orig_decoded_data();
         render();
     </script>
     <style>
@@ -65,6 +66,10 @@
             grid-template-columns: repeat(33, 1em);
             grid-template-rows: repeat(33, 1em);
             margin: 4em
+        }
+
+        input {
+            font-family: monospace;
         }
 
         .dark {
@@ -127,7 +132,10 @@
 <body>
 <div id="target"></div>
 
-<p>Edit to see how it changes the QR code [disregarding error correction]:<br>
+<p>Originally decoded from the QR code:<br>
+<input type=""text" size="60" id="original" disabled></p>
+
+<p>Edit below to see how it changes the QR code [disregarding error correction]:<br>
 <input type="text" size="60" id="decoded"></p>
 
 <p>Error correction status: <span id="errorstatus">you should start editing</span></p>
