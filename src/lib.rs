@@ -466,7 +466,7 @@ impl Code {
     }
 
     pub fn update(&mut self, new_data: &str) -> bool {
-        self.overrides = self.format_overrides.clone();
+        self.overrides = HashMap::new();
 
         for (locations, (orig, new)) in self
             .plaintext_locations
@@ -522,6 +522,8 @@ impl Code {
             };
             data[y * self.spec.size + x] = bit;
         }
+
+        self.overrides.extend(self.format_overrides.iter());
 
         for (((block_len, plaintext_len), block), unknown_indexes) in self
             .spec
